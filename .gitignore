@@ -51,3 +51,6 @@ rsconnect/
 
 # Ignore _site on website (will be force pushed on "published" branch)
 website/_site/
+
+# Scratch/experimentation script, not for version control
+R/temp.R
