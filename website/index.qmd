@@ -1,0 +1,12 @@
+---
+title: "Template Website"
+---
+
+This is a Template website.
+In order for this template to be renderable we always use this as a first code chunk in any Quarto file:
+
+```{r}
+# Use relative path to file from repo root
+here::i_am('website/index.qmd')
+```
+
