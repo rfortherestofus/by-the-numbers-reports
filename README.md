@@ -26,6 +26,8 @@ The ACS vintage and survey are set near the top of `R/import-data.R` (`acs_year`
 
 ## Getting started
 
+This project targets **R 4.5.2** (the version recorded in `renv.lock`).
+
 1. **Restore the R environment.** This project uses [`renv`](https://rstudio.github.io/renv/). From an R session at the repo root:
 
    ```r
