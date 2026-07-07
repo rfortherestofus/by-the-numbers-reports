@@ -8,6 +8,7 @@ here::i_am("R/data-viz.R")
 library(here)
 library(tidyverse)
 library(sf)
+library(marquee)
 
 # ---- Parameters ----
 focus_state <- "California" # state this report covers; must match the `state` column
@@ -44,3 +45,87 @@ county_map <- ggplot() +
   theme_void()
 
 county_map
+
+# ---- Median household income: focus county vs. rest of state ----
+# A strip plot: one dot per county along the income axis, with the focus county
+# highlighted so it is easy to see where it sits in the state's distribution.
+# The income and boundary datasets name counties differently ("Los Angeles
+# County" vs. "Los Angeles"), so match the focus county by its geoid instead.
+focus_geoid <- focus_county_data$geoid
+
+income_by_county <- read_rds(
+  here("data_clean", "median_household_income_by_county.rds")
+) |>
+  filter(state == focus_state) |>
+  mutate(is_focus = geoid == focus_geoid)
+
+focus_income <- income_by_county |>
+  filter(is_focus) |>
+  pull(median_household_income)
+
+# A darker green than the map fill so a small dot reads clearly; grey dots are
+# recessive context. `is_focus` (not color alone) also drives dot size.
+focus_color <- "#4C7A2F"
+other_color <- "grey70"
+
+# marquee style for the title: highlight the focus value with the same green as
+# the dot. Invoked with a `{.hl ...}` span in the title text below.
+title_style <- modify_style(
+  classic_style(),
+  "hl",
+  background = focus_color,
+  color = "white",
+  padding = trbl(em(0.1), em(0.1)),
+  border_radius = em(0.25)
+)
+
+# All dots sit on one row (y = 1); the vertical jitter only spreads overlapping
+# counties apart and carries no meaning (the subtitle says so). Seed keeps it
+# reproducible across renders.
+set.seed(1)
+income_plot <- ggplot(
+  income_by_county,
+  aes(x = median_household_income, y = 1)
+) +
+  geom_jitter(
+    data = \(d) filter(d, !is_focus),
+    height = 0.18,
+    width = 0,
+    color = other_color,
+    size = 2.5,
+    alpha = 0.8
+  ) +
+  geom_point(
+    data = \(d) filter(d, is_focus),
+    color = focus_color,
+    size = 4.5
+  ) +
+  scale_x_continuous(labels = scales::label_dollar()) +
+  scale_y_continuous(limits = c(0.4, 1.6)) +
+  labs(
+    title = paste0(
+      "Median household income in {.hl ",
+      focus_county,
+      " County",
+      "}",
+      " is ",
+      scales::dollar(focus_income, accuracy = 1)
+    ),
+    subtitle = paste0(
+      "Each gray dot is another ",
+      focus_state,
+      " county; dots are spread to random heights to avoid overlap"
+    ),
+    x = NULL,
+    y = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_marquee(style = title_style),
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    panel.grid = element_blank(),
+    panel.grid.major.x = element_line(color = "grey92")
+  )
+
+income_plot
