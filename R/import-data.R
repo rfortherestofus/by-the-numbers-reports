@@ -86,10 +86,11 @@ state_boundaries <- states(cb = TRUE, year = acs_year) |>
 
 # ---- 5. County boundaries ----
 # The 5-digit `geoid` (state FIPS + county FIPS) joins directly to the ACS
-# county tables above.
+# county tables above. `state` (full name) matches the ACS `state` column and
+# the state_boundaries `state` column, so reports can filter counties by state.
 county_boundaries <- counties(cb = TRUE, year = acs_year) |>
-  rename(geoid = GEOID, county = NAME) |>
-  select(geoid, county, geometry)
+  rename(geoid = GEOID, county = NAME, state = STATE_NAME) |>
+  select(geoid, county, state, geometry)
 
 # ---- Save tidy outputs ----
 write_rds(
