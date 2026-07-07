@@ -18,6 +18,7 @@ Running `R/import-data.R` writes the following files to `data_clean/`. All count
 | --- | --- |
 | `median_household_income_by_county.rds` | Median household income per county (ACS `B19013_001`) |
 | `population_by_county_and_race_ethnicity.rds` | Population by county broken out by race/ethnicity (ACS `B03002`) |
+| `population_by_state_and_race_ethnicity.rds` | Population by state broken out by race/ethnicity (ACS `B03002`), for comparing a county against its state without summing counties |
 | `total_population_by_county.rds` | Total population per county (ACS `B01003_001`) |
 | `state_boundaries.rds` | Generalized state boundary geometries (cartographic) |
 | `county_boundaries.rds` | Generalized county boundary geometries (cartographic) |

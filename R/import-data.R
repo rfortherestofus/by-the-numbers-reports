@@ -66,6 +66,20 @@ population_by_county_and_race_ethnicity <- get_acs(
   clean_geo() |>
   select(geoid, county, state, race_ethnicity = variable, population = estimate)
 
+# The same B03002 groups fetched at the state level, so reports can compare a
+# county against its state without summing county estimates downstream. This
+# returns the Census Bureau's official state estimates. State NAME is just the
+# state name (no ", State" suffix), so it can't use clean_geo(); the 2-digit
+# `geoid` is the state FIPS code.
+population_by_state_and_race_ethnicity <- get_acs(
+  geography = "state",
+  variables = race_ethnicity_vars,
+  year = acs_year,
+  survey = acs_survey
+) |>
+  rename(geoid = GEOID, state = NAME) |>
+  select(geoid, state, race_ethnicity = variable, population = estimate)
+
 # ---- 3. Total population ----
 total_population_by_county <- get_acs(
   geography = "county",
@@ -100,6 +114,10 @@ write_rds(
 write_rds(
   population_by_county_and_race_ethnicity,
   here("data_clean", "population_by_county_and_race_ethnicity.rds")
+)
+write_rds(
+  population_by_state_and_race_ethnicity,
+  here("data_clean", "population_by_state_and_race_ethnicity.rds")
 )
 write_rds(
   total_population_by_county,

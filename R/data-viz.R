@@ -1,75 +1,51 @@
 # Data visualizations for the "by the numbers" reports.
 #
 # Reads the tidy datasets written by R/import-data.R (from data_clean/) and
-# builds the figures for a single-state report. Set `state` below to the state
-# the report covers; everything downstream filters the nationwide data to it.
+# builds the figures for a single-state report. Set the focus parameters below;
+# everything downstream filters the nationwide data to them.
 here::i_am("R/data-viz.R")
 
 library(here)
 library(tidyverse)
 library(sf)
 library(marquee)
+library(gt)
 
 # ---- Parameters ----
 focus_state <- "California" # state this report covers; must match the `state` column
 focus_county <- "Los Angeles" # county to highlight; must match the `county` column
 
-# ---- State map ----
-# state_boundaries covers every state; filter to the report's state and draw it.
-state_boundaries <- read_rds(here("data_clean", "state_boundaries.rds"))
+# ---- Palette ----
+focus_color <- "#4C7A2F" # highlight for dots, bars, and the table
+focus_fill <- "#A8C686" # lighter green for the filled focus county on the map
+other_color <- "grey70" # non-focus / context
 
+# ---- Shared setup ----
+# Every cleaned dataset lives in data_clean/.
+read_clean <- function(name) read_rds(here("data_clean", name))
+
+# Flag the focus county by geoid. The ACS tables and boundary files name
+# counties differently ("Los Angeles County" vs. "Los Angeles"), so geoid is the
+# only reliable key. Resolves `focus_geoid` from the global env when called.
+mark_focus <- function(df) {
+  df |> mutate(is_focus = geoid == focus_geoid)
+}
+
+# Boundaries, plus the focus county's geoid and label, reused throughout.
+state_boundaries <- read_clean("state_boundaries.rds")
 state_map_data <- state_boundaries |>
   filter(state == focus_state)
 
-state_map <- ggplot(state_map_data) +
-  geom_sf() +
-  theme_void()
-
-state_map
-
-# ---- County map ----
-# county_boundaries covers every county; filter to the focus state, then pull
-# out the focus county to highlight.
-county_boundaries <- read_rds(here("data_clean", "county_boundaries.rds"))
-
+county_boundaries <- read_clean("county_boundaries.rds")
 county_map_data <- county_boundaries |>
   filter(state == focus_state)
-
 focus_county_data <- county_map_data |>
   filter(county == focus_county)
 
-# Draw the whole state in grey, then layer the focus county on top in green.
-county_map <- ggplot() +
-  geom_sf(data = state_map_data, fill = "grey70", color = "white") +
-  geom_sf(data = focus_county_data, fill = "#A8C686", color = "grey40") +
-  theme_void()
-
-county_map
-
-# ---- Median household income: focus county vs. rest of state ----
-# A strip plot: one dot per county along the income axis, with the focus county
-# highlighted so it is easy to see where it sits in the state's distribution.
-# The income and boundary datasets name counties differently ("Los Angeles
-# County" vs. "Los Angeles"), so match the focus county by its geoid instead.
 focus_geoid <- focus_county_data$geoid
+focus_label <- paste0(focus_county, " County")
 
-income_by_county <- read_rds(
-  here("data_clean", "median_household_income_by_county.rds")
-) |>
-  filter(state == focus_state) |>
-  mutate(is_focus = geoid == focus_geoid)
-
-focus_income <- income_by_county |>
-  filter(is_focus) |>
-  pull(median_household_income)
-
-# A darker green than the map fill so a small dot reads clearly; grey dots are
-# recessive context. `is_focus` (not color alone) also drives dot size.
-focus_color <- "#4C7A2F"
-other_color <- "grey70"
-
-# marquee style for the title: highlight the focus value with the same green as
-# the dot. Invoked with a `{.hl ...}` span in the title text below.
+# marquee style for titles: highlight a `{.hl ...}` span with the focus green.
 title_style <- modify_style(
   classic_style(),
   "hl",
@@ -78,6 +54,33 @@ title_style <- modify_style(
   padding = trbl(em(0.1), em(0.1)),
   border_radius = em(0.25)
 )
+
+# ---- State map ----
+state_map <- ggplot(state_map_data) +
+  geom_sf() +
+  theme_void()
+
+state_map
+
+# ---- County map ----
+# Draw the whole state in grey, then layer the focus county on top in green.
+county_map <- ggplot() +
+  geom_sf(data = state_map_data, fill = other_color, color = "white") +
+  geom_sf(data = focus_county_data, fill = focus_fill, color = "grey40") +
+  theme_void()
+
+county_map
+
+# ---- Median household income: focus county vs. rest of state ----
+# A strip plot: one dot per county along the income axis, with the focus county
+# highlighted so it is easy to see where it sits in the state's distribution.
+income_by_county <- read_clean("median_household_income_by_county.rds") |>
+  filter(state == focus_state) |>
+  mark_focus()
+
+focus_income <- income_by_county |>
+  filter(is_focus) |>
+  pull(median_household_income)
 
 # All dots sit on one row (y = 1); the vertical jitter only spreads overlapping
 # counties apart and carries no meaning (the subtitle says so). Seed keeps it
@@ -105,10 +108,8 @@ income_plot <- ggplot(
   labs(
     title = paste0(
       "Median household income in {.hl ",
-      focus_county,
-      " County",
-      "}",
-      " is ",
+      focus_label,
+      "} is ",
       scales::dollar(focus_income, accuracy = 1)
     ),
     subtitle = paste0(
@@ -129,3 +130,212 @@ income_plot <- ggplot(
   )
 
 income_plot
+
+# ---- Population by race/ethnicity: focus county vs. state ----
+# Paired horizontal bars: for each race/ethnicity group, the focus county's
+# share of the population (green) sits above the statewide share (grey), so the
+# reader can see where the county's composition diverges from the state. Groups
+# are ordered by their share in the focus county. The focus county is pulled
+# from the county table (matched by geoid, not name); the statewide figures come
+# from the separate state table (official state estimates, built in
+# import-data.R) rather than being summed from counties here.
+
+# Three groups are each under 1% of the population; collapse them into "Other"
+# so the chart stays legible and every bar is readable.
+small_race_groups <- c(
+  "American Indian and Alaska Native",
+  "Native Hawaiian and Other Pacific Islander",
+  "Some other race"
+)
+
+collapse_small_race_groups <- function(df) {
+  df |>
+    mutate(
+      race_ethnicity = if_else(
+        race_ethnicity %in% small_race_groups,
+        "Other",
+        race_ethnicity
+      )
+    )
+}
+
+# Collapse small groups, then each group's share of the geography's population.
+compute_shares <- function(df, geo_label) {
+  df |>
+    collapse_small_race_groups() |>
+    summarise(population = sum(population), .by = race_ethnicity) |>
+    mutate(share = population / sum(population), geo = geo_label)
+}
+
+# Focus county shares (county table) and statewide shares (state table).
+focus_race_shares <- read_clean("population_by_county_and_race_ethnicity.rds") |>
+  filter(geoid == focus_geoid) |>
+  compute_shares(focus_label)
+
+state_race_shares <- read_clean("population_by_state_and_race_ethnicity.rds") |>
+  filter(state == focus_state) |>
+  compute_shares(focus_state)
+
+# Order groups by their share in the focus county, with "Other" pinned last.
+# `rev()` because the first factor level sits at the bottom of a discrete axis.
+race_order <- focus_race_shares |>
+  arrange(desc(share)) |>
+  pull(race_ethnicity)
+race_order <- c(setdiff(race_order, "Other"), "Other")
+
+race_shares <- bind_rows(focus_race_shares, state_race_shares) |>
+  mutate(
+    race_ethnicity = factor(race_ethnicity, levels = rev(race_order)),
+    # state first so the green focus bar dodges to the top of each pair.
+    geo = factor(geo, levels = c(focus_state, focus_label))
+  )
+
+# Two colors only (green focus, grey context), which is inherently
+# colorblind-safe, unlike a per-category categorical palette. Direct labels at
+# the bar ends carry the exact values, so no x axis is needed. The title is
+# added downstream in Quarto rather than here.
+race_fill_values <- set_names(
+  c(focus_color, other_color),
+  c(focus_label, focus_state)
+)
+
+# Instead of a legend, label the two bars of the top (largest) group directly:
+# focus county inside the green bar, state inside the grey bar. White text reads
+# on the dark green bar; dark text reads on the grey bar.
+race_direct_labels <- race_shares |>
+  filter(race_ethnicity == race_order[1])
+
+race_label_colors <- set_names(
+  c("white", "grey20"),
+  c(focus_label, focus_state)
+)
+
+race_plot <- ggplot(
+  race_shares,
+  aes(x = share, y = race_ethnicity, fill = geo)
+) +
+  geom_col(
+    position = position_dodge(width = 0.7),
+    width = 0.65
+  ) +
+  geom_text(
+    aes(label = scales::percent(share, accuracy = 1)),
+    position = position_dodge(width = 0.7),
+    hjust = -0.2,
+    size = 3.1,
+    color = "grey30"
+  ) +
+  geom_text(
+    data = race_direct_labels,
+    aes(x = 0.008, label = geo, color = geo),
+    position = position_dodge(width = 0.7),
+    hjust = 0,
+    size = 3,
+    show.legend = FALSE
+  ) +
+  scale_x_continuous(
+    labels = scales::label_percent(),
+    expand = expansion(mult = c(0, 0.12))
+  ) +
+  scale_fill_manual(values = race_fill_values, guide = "none") +
+  scale_color_manual(values = race_label_colors, guide = "none") +
+  labs(
+    x = NULL,
+    y = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  )
+
+race_plot
+
+# ---- Total population by county (table) ----
+# Every county's total population in a two-column "newspaper" layout so all 58
+# rows fit without an overly long table. Counties are ordered most to least
+# populous; the focus county is bolded and greened. Match by geoid, not name.
+population_by_county <- read_clean("total_population_by_county.rds") |>
+  filter(state == focus_state) |>
+  mark_focus() |>
+  arrange(desc(total_population))
+
+# Reshape the single 58-row frame into two side-by-side county/population pairs.
+# `col` (1 or 2) is the visual column and `slot` the row within it; the focus
+# flag rides along so the highlight follows the county to whichever column it
+# lands in.
+n_counties <- nrow(population_by_county)
+rows_per_col <- ceiling(n_counties / 2)
+# match() (not which()) yields NA rather than length-0 if the focus is missing.
+focus_rank <- match(TRUE, population_by_county$is_focus)
+
+population_table_data <- population_by_county |>
+  mutate(
+    col = (row_number() - 1) %/% rows_per_col + 1,
+    slot = (row_number() - 1) %% rows_per_col + 1
+  ) |>
+  pivot_wider(
+    id_cols = slot,
+    names_from = col,
+    values_from = c(county, total_population, is_focus)
+  ) |>
+  select(
+    county_1,
+    total_population_1,
+    county_2,
+    total_population_2,
+    is_focus_1,
+    is_focus_2
+  )
+
+# "the largest population" when the focus county ranks first, else "the Nth-largest".
+focus_rank_phrase <- if (isTRUE(focus_rank == 1)) {
+  "the largest population"
+} else {
+  paste0("the ", scales::ordinal(focus_rank), "-largest population")
+}
+
+# Both visual columns get the same focus highlight, keyed on their own flag, so
+# the bold green follows the county to whichever column it lands in.
+focus_column_groups <- list(
+  list(cols = c("county_1", "total_population_1"), flag = "is_focus_1"),
+  list(cols = c("county_2", "total_population_2"), flag = "is_focus_2")
+)
+
+population_table <- population_table_data |>
+  gt() |>
+  tab_header(
+    title = md(str_glue(
+      "**{focus_label}** has {focus_rank_phrase} of {focus_state}'s {n_counties} counties"
+    )),
+    subtitle = "Total population of every county, ordered from most to least populous"
+  ) |>
+  cols_label(
+    county_1 = "County",
+    total_population_1 = "Population",
+    county_2 = "County",
+    total_population_2 = "Population"
+  ) |>
+  fmt_number(c(total_population_1, total_population_2), decimals = 0) |>
+  sub_missing(missing_text = "") |>
+  cols_align("left", c(county_1, county_2)) |>
+  cols_align("right", c(total_population_1, total_population_2))
+
+population_table <- reduce(
+  focus_column_groups,
+  \(tbl, group) {
+    tbl |>
+      tab_style(
+        style = cell_text(weight = "bold", color = focus_color),
+        locations = cells_body(
+          columns = all_of(group$cols),
+          rows = .data[[group$flag]] %in% TRUE
+        )
+      )
+  },
+  .init = population_table
+) |>
+  cols_hide(c(is_focus_1, is_focus_2))
+
+population_table
