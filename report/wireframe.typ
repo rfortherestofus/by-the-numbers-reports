@@ -5,7 +5,10 @@
 // hierarchy can be judged. Compile with:
 //   typst compile report/wireframe.typ outputs/wireframe.pdf
 
-// ---- Palette (mirrors R/data-viz.R) ----
+// ---- Palette ----
+// Static mockup colors. The real reports are styled per state from
+// data_raw/state_colors.csv (see the README); this wireframe keeps the original
+// green so it stays a self-contained layout reference.
 #let focus-color = rgb("#4C7A2F")
 #let focus-fill = rgb("#A8C686")
 #let other-color = rgb("#b3b3b3")

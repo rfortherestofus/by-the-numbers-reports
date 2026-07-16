@@ -1,14 +1,18 @@
 ---
-# "By the numbers" county report. Layout follows report/wireframe.typ.
+# "By the numbers" state report: a state cover page followed by a two-page
+# profile for every county in the state.
 #
-# county/state below are the report parameters: typst-show.typ passes them
-# into the report() template (header band, footer), and the setup chunk
-# passes them to R/data-viz.R (data filtering). `county` must match the
-# `county` column in the cleaned data (bare name, no "County" suffix).
+# `state` below is the report parameter. typst-show.typ passes it into the
+# report() template (footer branding) and the setup chunk passes it to
+# R/data-viz.R (data filtering). Render every state with R/render-reports.R, or
+# one state with:  quarto render report/report.qmd -M state:Oregon
+#
+# Optional `county` override: setting it (e.g. -M county:"Los Angeles", bare
+# name, no " County") renders just that one county's two pages, the old
+# single-county report. Left unset, the full state report is produced.
 #
 # All Typst definitions live in typst-template.typ; this document only calls
-# them. Render with: quarto render report/report.qmd
-county: San Diego
+# them.
 state: California
 format:
   typst:
@@ -31,13 +35,33 @@ execute:
 Sys.setenv(RENV_PROJECT = normalizePath(".."))
 source("../renv/activate.R")
 
-# The YAML metadata above is the single source of the report parameters;
-# data-viz.R falls back to its own defaults only when run interactively.
-focus_state <- rmarkdown::metadata$state
-focus_county <- rmarkdown::metadata$county
+# The report parameters. R/render-reports.R sets BTN_STATE (and optionally
+# BTN_COUNTY) per render; when unset, the YAML `state` above is the default.
+# Environment variables are used rather than `-M`/metadata because knitr reads
+# the YAML front matter before Quarto applies metadata overrides, so `-M` would
+# not reach this R code (it would only reach pandoc and the Typst footer).
+env_state <- Sys.getenv("BTN_STATE", unset = "")
+focus_state <- if (nzchar(env_state)) env_state else rmarkdown::metadata$state
+# Optional single-county override; "" (unset) means "the whole state".
+env_county <- Sys.getenv("BTN_COUNTY", unset = "")
+focus_county <- if (nzchar(env_county)) env_county else NULL
 
 # All figures and report data come from the shared data-viz script.
 source(here::here("R", "data-viz.R"))
+
+# The state theme handed to the Typst layout: the accent color and its tint (so
+# each state's report is a different color), plus the state name for the footer.
+# Written before Typst compiles; typst-template.typ imports it. This keeps the
+# accent defined once (data_raw/state_colors.csv, read by data-viz.R) rather than
+# duplicated across R and Typst, and keeps the footer in step with focus_state.
+writeLines(
+  c(
+    sprintf('#let focus-color = rgb("%s")', focus_color),
+    sprintf('#let focus-fill = rgb("%s")', focus_fill),
+    sprintf('#let report-state = "%s"', focus_state)
+  ),
+  here::here("report", "_state-theme.typ")
+)
 
 # Emit a raw Typst block from an asis chunk.
 typst <- function(...) {
@@ -56,9 +80,11 @@ acs_year <- read_lines(here::here("R", "import-data.R")) |>
   str_extract("\\d{4}") |>
   as.integer()
 acs_range <- str_glue("{acs_year - 4}–{acs_year}")
+generated_date <- str_squish(format(Sys.Date(), "%B %e, %Y"))
 
-# Export the figures the Typst layout embeds. SVG via svglite (named
-# explicitly so renv::snapshot() keeps it in the lockfile).
+# Export the figures the Typst layout embeds. SVG via svglite (named explicitly
+# so renv::snapshot() keeps it in the lockfile). Figures are geoid-prefixed so
+# the counties in one render do not clobber each other.
 fig_dir <- here::here("report", "figures")
 dir.create(fig_dir, showWarnings = FALSE)
 save_svg <- function(name, plot, width, height) {
@@ -70,113 +96,142 @@ save_svg <- function(name, plot, width, height) {
     height = height
   )
 }
-# Full-width figures match the 5.8in content width (us-letter minus the
-# 1.35in x margins set in typst-template.typ) so fonts render at true size.
-save_svg("county-map.svg", county_map, 3.2, 3.2)
-save_svg("race-plot.svg", race_plot, 5.8, 3.4)
-save_svg("income-plot.svg", income_plot, 5.8, 1.7)
-```
 
-```{r}
-#| label: typst-values
-#| output: asis
+# The county population table for a given focus county: n_table_cols side-by-side
+# county/population pairs separated by spacer columns, filled top to bottom, left
+# to right (population-table() in typst-template.typ builds the matching
+# columns). Typst tables are a flat cell stream, so short columns are padded with
+# empty cells to keep later rows aligned. Three columns is the most that fits the
+# 5.8in content width without wrapping names; the " County" suffix is dropped so
+# names stay on one line (the column header already says "County").
+population_table_typst <- function(focus_geoid) {
+  n_table_cols <- 3
+  rows_per_col <- ceiling(n_counties / n_table_cols)
 
-# Values computed in R that the body text references, passed to Typst as
-# `#let` bindings. Values are Typst strings, which also keeps "$" from being
-# read as math markup.
-typst(tglue(
-  '
-#let focus-county = "<<focus_label>>"
-#let focus-state = "<<focus_state>>"
-#let n-counties = "<<n_counties>>"
-#let focus-population = "<<scales::comma(focus_population)>>"
-#let focus-income = "<<scales::dollar(focus_income, accuracy = 1)>>"
-#let acs-range = "<<acs_range>>"
-#let generated-date = "<<str_squish(format(Sys.Date(), "%B %e, %Y"))>>"
-'
-))
-```
+  county_cells <- population_by_county |>
+    mutate(
+      is_focus = geoid == focus_geoid,
+      name = str_remove(county, " County$"),
+      cell = tglue(
+        '..county-cell("<<name>>", "<<scales::comma(total_population)>>", focus: <<tolower(is_focus)>>),'
+      ),
+      col = (row_number() - 1) %/% rows_per_col,
+      slot = (row_number() - 1) %% rows_per_col
+    )
 
-```{=typst}
-// ---- Big numbers + county locator map ----
+  table_rows <- map_chr(seq_len(rows_per_col) - 1, function(s) {
+    pairs <- map_chr(seq_len(n_table_cols) - 1, function(cl) {
+      cell <- county_cells |> filter(col == cl, slot == s) |> pull(cell)
+      if (length(cell) == 1) cell else "[], [],"
+    })
+    paste(pairs, collapse = " [],\n  ")
+  })
+
+  tglue(
+    '#population-table(\n  <<n_table_cols>>,\n  <<paste(table_rows, collapse = "\n  ")>>\n)'
+  )
+}
+
+# Emit one county's two-page spread: page 1 (big numbers, locator map, the
+# statewide population table with this county flagged), then page 2 (the
+# race/ethnicity and income comparison charts). No trailing page break; the
+# driver below inserts breaks between spreads.
+emit_county <- function(focus_geoid) {
+  save_svg(
+    sprintf("%s-map.svg", focus_geoid),
+    county_map(focus_geoid),
+    3.2,
+    3.2
+  )
+  save_svg(
+    sprintf("%s-race.svg", focus_geoid),
+    race_plot(focus_geoid),
+    5.8,
+    3.4
+  )
+  save_svg(
+    sprintf("%s-income.svg", focus_geoid),
+    income_plot(focus_geoid),
+    5.8,
+    1.7
+  )
+
+  s <- county_stats(focus_geoid)
+  typst(tglue(
+    '
+#county-header("<<s$label>>")
+
+// Page 1: big numbers + county locator map.
 #grid(
   columns: (1fr, 2.5in),
   column-gutter: 0.4in,
   align: horizon,
   [
-    #stat(focus-population, "Total population")
+    #stat("<<scales::comma(s$population)>>", "Total population")
     #v(0.25in)
-    #stat(focus-income, "Median household income")
+    #stat("<<scales::dollar(s$income, accuracy = 1)>>", "Median household income")
   ],
-  image("figures/county-map.svg", width: 100%),
+  image("figures/<<focus_geoid>>-map.svg", width: 100%),
 )
 
 #section-title(
   [Total Population],
-  subtitle: [Every #focus-state county, ordered from most to least populous],
+  subtitle: [Every <<focus_state>> county, ordered from most to least populous; #hl("<<s$label>>") highlighted],
 )
-```
 
-```{r}
-#| label: population-table
-#| output: asis
+<<population_table_typst(focus_geoid)>>
 
-# The population table cells: n_table_cols side-by-side county/population
-# pairs separated by spacer columns, filled top to bottom, left to right
-# (population-table() in typst-template.typ builds the matching columns).
-# Typst tables are a flat cell stream, so short columns are padded with empty
-# cells to keep later rows aligned. Three columns is the most that fits the
-# 5.8in content width without wrapping names; the " County" suffix is dropped
-# so names stay on one line (the column header already says "County").
-n_table_cols <- 3
-rows_per_col <- ceiling(n_counties / n_table_cols)
-
-county_cells <- population_by_county |>
-  mutate(
-    county = str_remove(county, " County$"),
-    cell = tglue(
-      '..county-cell("<<county>>", "<<scales::comma(total_population)>>", focus: <<tolower(is_focus)>>),'
-    ),
-    col = (row_number() - 1) %/% rows_per_col,
-    slot = (row_number() - 1) %% rows_per_col
-  )
-
-table_rows <- map_chr(seq_len(rows_per_col) - 1, function(s) {
-  pairs <- map_chr(seq_len(n_table_cols) - 1, function(cl) {
-    cell <- county_cells |> filter(col == cl, slot == s) |> pull(cell)
-    if (length(cell) == 1) cell else "[], [],"
-  })
-  paste(pairs, collapse = " [],\n  ")
-})
-
-typst(tglue(
-  '
-#population-table(
-  <<n_table_cols>>,
-  <<paste(table_rows, collapse = "\n  ")>>
-)
-'
-))
-```
-
-```{=typst}
 #pagebreak()
 
-// ---- Comparison charts ----
+// Page 2: comparison charts.
 #section-title(
   [Population by Race/Ethnicity],
-  subtitle: [Share of total population in #hl[#focus-county] and #hl-gray[#focus-state] as a whole],
+  subtitle: [Share of total population in #hl("<<s$label>>") and #hl-gray("<<focus_state>>") as a whole],
 )
 
-#image("figures/race-plot.svg", width: 100%)
+#image("figures/<<focus_geoid>>-race.svg", width: 100%)
 
 #section-title(
   [Median Household Income],
-  subtitle: [#hl[#focus-county] among #hl-gray[all #n-counties #focus-state counties]; dots are spread vertically only to avoid overlap],
+  subtitle: [#hl("<<s$label>>") among #hl-gray("all <<n_counties>> <<focus_state>> counties"); dots are spread vertically only to avoid overlap],
 )
 
-#image("figures/income-plot.svg", width: 100%)
+#image("figures/<<focus_geoid>>-income.svg", width: 100%)
 
 #v(1fr)
-#sources-note(acs-range, generated-date)
+#sources-note("<<acs_range>>", "<<generated_date>>")
+'
+  ))
+}
+```
+
+```{r}
+#| label: report-body
+#| output: asis
+
+if (is.null(focus_county)) {
+  # Full state report: a cover page, then each county in alphabetical order.
+  flag_rel <- sprintf("flags/%s.svg", state_slug)
+  typst(tglue(
+    '#state-cover("<<focus_state>>", "<<flag_rel>>", "<<scales::comma(state_total_population)>>", "<<n_counties>>")\n#pagebreak()'
+  ))
+
+  for (i in seq_len(nrow(counties_alpha))) {
+    if (i > 1) {
+      typst("#pagebreak()")
+    }
+    emit_county(counties_alpha$geoid[[i]])
+  }
+} else {
+  # Single-county override: the state band, then that county's two pages.
+  focus_geoid <- population_by_county |>
+    mutate(bare = str_remove(county, " County$")) |>
+    filter(bare == focus_county) |>
+    pull(geoid)
+  if (length(focus_geoid) != 1) {
+    stop("County not found in ", focus_state, ": ", focus_county)
+  }
+  typst(tglue('#state-band("<<focus_state>>")\n#v(0.25in)'))
+  emit_county(focus_geoid)
+}
 ```

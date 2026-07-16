@@ -8,16 +8,18 @@
 // Typst.
 
 // ---- Palette ----
-// Keep in sync with the palette in R/data-viz.R, which colors the chart marks.
-#let focus-color = rgb("#4C7A2F")
-#let focus-fill = rgb("#A8C686")
+// The state accent (focus-color) and its light tint (focus-fill) are written
+// per render by the report.qmd setup chunk into _state-theme.typ, from the same
+// value R/data-viz.R uses for the chart marks. This is what makes each state's
+// report a different color. The context colors below are constant.
+#import "_state-theme.typ": focus-color, focus-fill, report-state
 #let other-color = rgb("#B3B3B3")
 #let ink = rgb("#333333")
 
 // ---- Helpers ----
 
-// Green highlight pill for the focus county. Doubles as an inline legend key
-// for the green marks in the charts.
+// Accent highlight pill for the focus county. Doubles as an inline legend key
+// for the accent-colored marks in the charts.
 #let hl(body) = box(
   fill: focus-color,
   radius: 0.2em,
@@ -51,7 +53,7 @@
 ]
 
 // One county/population pair in the population table; the focus county is
-// bold and green.
+// bold and accent-colored.
 #let county-cell(name, pop, focus: false) = {
   let style = if focus { (weight: "bold", fill: focus-color) } else { (:) }
   (
@@ -102,15 +104,60 @@
   ]
 }
 
+// State-branded header band, bleeding to the top and side page edges. Zero x
+// inset keeps the band's text on the content grid's left edge (which the 1.35in
+// page margin aligns to). Shown on the state cover page.
+#let state-band(state) = block(
+  width: 100%,
+  fill: focus-color,
+  inset: (x: 0in, bottom: 0.35in, top: 0.1in),
+  outset: (x: 1.35in, top: 0.75in),
+)[
+  #text(fill: white, size: 26pt, weight: "bold")[#state] \
+  #text(fill: focus-fill, size: 16pt, weight: "medium")[By the Numbers] \
+  #v(0.2em)
+  #text(fill: white.transparentize(25%), size: 9pt)[
+    A demographic and economic profile from the American Community Survey
+    (5-year estimates)
+  ]
+]
+
+// The heading that opens a county's spread. `county` is the full label
+// ("Los Angeles County"), so no suffix is added here.
+#let county-header(county) = {
+  text(size: 20pt, weight: "bold", fill: focus-color, county)
+  v(0.1in)
+}
+
+// The state cover page: the header band, the state flag, and statewide totals.
+// The flag appears only here; the county spreads carry just the accent color.
+#let state-cover(state, flag, population, counties) = {
+  state-band(state)
+  v(0.5in)
+  grid(
+    columns: (1.1fr, 1fr),
+    column-gutter: 0.5in,
+    align: horizon,
+    {
+      stat(population, "Total population")
+      v(0.3in)
+      stat(counties, "Counties")
+    },
+    block(stroke: 0.5pt + luma(70%), image(flag, width: 100%)),
+  )
+  v(1fr)
+  text(size: 9pt, fill: luma(40%))[
+    A two-page profile follows for each of #state's #counties counties, ordered
+    alphabetically.
+  ]
+}
+
 // ---- The report template ----
-// county and state arrive from the document YAML via typst-show.typ. The
-// report is branded to the state (band, footer); the county names the
-// profile page below the band.
-#let report(
-  county: none,
-  state: none,
-  content,
-) = {
+// The state name for the footer comes from report-state (written into
+// _state-theme.typ by report.qmd, so it tracks the R focus_state). The visible
+// content (cover, county spreads) is emitted from report.qmd so the layout can
+// repeat once per county.
+#let report(content) = {
   // The x margin puts the body content on the same left edge as the header
   // band's text, which is what makes the band read as part of the same grid.
   set page(
@@ -118,37 +165,13 @@
     margin: (x: 1.35in, top: 0.75in, bottom: 0.9in),
     footer: context [
       #set text(size: 8pt, fill: gray)
-      #state: By the Numbers
+      #report-state: By the Numbers
       #h(1fr)
       #counter(page).display()
     ],
   )
   set text(font: "Helvetica Neue", size: 10pt, fill: ink)
   set par(leading: 0.6em, justify: false)
-
-  // Header band, bleeding to the top and side page edges. Zero x inset keeps
-  // the band's text on the content grid's left edge.
-  block(
-    width: 100%,
-    fill: focus-color,
-    inset: (x: 0in, bottom: 0.35in, top: 0.1in),
-    outset: (x: 1.35in, top: 0.75in),
-  )[
-    #text(fill: white, size: 26pt, weight: "bold")[#state] \
-    #text(fill: focus-fill, size: 16pt, weight: "medium")[By the Numbers] \
-    #v(0.2em)
-    #text(fill: white.transparentize(25%), size: 9pt)[
-      A demographic and economic profile from the American Community Survey
-      (5-year estimates)
-    ]
-  ]
-
-  v(0.25in)
-
-  // This page's county profile.
-  text(size: 20pt, weight: "bold", fill: focus-color)[#county County]
-
-  v(0.1in)
 
   content
 }

@@ -59,3 +59,9 @@ R/temp.R
 report/report.pdf
 report/report.typ
 report/figures/
+# Per-state accent palette, written at render time from data_raw/state_colors.csv
+report/_state-theme.typ
+# Quarto knitr intermediates
+report/report.rmarkdown
+report/report.knit.md
+report/report_files/
