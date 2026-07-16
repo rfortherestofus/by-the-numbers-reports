@@ -45,7 +45,7 @@
 ]
 
 // Section title + optional subtitle, replacing in-chart ggplot titles.
-#let section-title(title, subtitle: none) = block(above: 1.6em, below: 0.9em)[
+#let section-title(title, subtitle: none) = block(above: 1.1em, below: 0.7em)[
   #text(size: 14pt, weight: "bold", title)
   #if subtitle != none [
     \ #text(size: 9pt, fill: luma(40%), subtitle)
@@ -147,8 +147,8 @@
   )
   v(1fr)
   text(size: 9pt, fill: luma(40%))[
-    A two-page profile follows for each of #state's #counties counties, ordered
-    alphabetically.
+    A profile follows for each of #state's #counties counties, ordered
+    alphabetically, after the countywide population ranking.
   ]
 }
 

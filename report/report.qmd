@@ -97,20 +97,38 @@ save_svg <- function(name, plot, width, height) {
   )
 }
 
-# The county population table for a given focus county: n_table_cols side-by-side
-# county/population pairs separated by spacer columns, filled top to bottom, left
-# to right (population-table() in typst-template.typ builds the matching
-# columns). Typst tables are a flat cell stream, so short columns are padded with
-# empty cells to keep later rows aligned. Three columns is the most that fits the
-# 5.8in content width without wrapping names; the " County" suffix is dropped so
-# names stay on one line (the column header already says "County").
-population_table_typst <- function(focus_geoid) {
+# The locator map is rasterized to PNG instead of SVG: it embeds the state's full
+# boundary geometry, which as vector paths repeats megabytes of coastline once
+# per county (a 254-county state ran ~23 MB, near Cloudflare's 25 MiB/file cap).
+# A small PNG is a few KB and looks identical at the 2.2in display size. The
+# text-bearing charts stay SVG so their labels stay crisp.
+save_png <- function(name, plot, width, height, dpi = 300) {
+  ggsave(
+    file.path(fig_dir, name),
+    plot,
+    device = ragg::agg_png,
+    width = width,
+    height = height,
+    dpi = dpi
+  )
+}
+
+# The county population table: n_table_cols side-by-side county/population pairs
+# separated by spacer columns, filled top to bottom, left to right
+# (population-table() in typst-template.typ builds the matching columns). Typst
+# tables are a flat cell stream, so short columns are padded with empty cells to
+# keep later rows aligned. Three columns is the most that fits the 5.8in content
+# width without wrapping names; the " County" suffix is dropped so names stay on
+# one line (the column header already says "County"). Pass a focus_geoid to bold
+# and accent that county (single-county mode); NULL leaves the table unhighlighted
+# (the shared ranking section in a state report).
+population_table_typst <- function(focus_geoid = NULL) {
   n_table_cols <- 3
   rows_per_col <- ceiling(n_counties / n_table_cols)
 
   county_cells <- population_by_county |>
     mutate(
-      is_focus = geoid == focus_geoid,
+      is_focus = if (is.null(focus_geoid)) FALSE else geoid == focus_geoid,
       name = str_remove(county, " County$"),
       cell = tglue(
         '..county-cell("<<name>>", "<<scales::comma(total_population)>>", focus: <<tolower(is_focus)>>),'
@@ -132,48 +150,60 @@ population_table_typst <- function(focus_geoid) {
   )
 }
 
-# Emit one county's two-page spread: page 1 (big numbers, locator map, the
-# statewide population table with this county flagged), then page 2 (the
-# race/ethnicity and income comparison charts). No trailing page break; the
-# driver below inserts breaks between spreads.
-emit_county <- function(focus_geoid) {
-  save_svg(
-    sprintf("%s-map.svg", focus_geoid),
+# The shared "Counties by Population" section: the full ranked table, rendered
+# once after the cover page in a state report (rather than repeated on every
+# county page). Ends with the sources note and a page break.
+emit_population_section <- function() {
+  typst(tglue(
+    '
+#section-title(
+  [Counties by Population],
+  subtitle: [All <<n_counties>> <<focus_state>> counties, ordered from most to least populous],
+)
+
+<<population_table_typst()>>
+
+#v(1fr)
+#sources-note("<<acs_range>>", "<<generated_date>>")
+
+#pagebreak()
+'
+  ))
+}
+
+# Emit one county's profile: the big numbers and locator map, then the
+# race/ethnicity and income comparison charts. In a state report this is a single
+# page (include_table = FALSE); the ranked county table lives in its own section
+# (emit_population_section). In single-county mode (include_table = TRUE) it keeps
+# the old two-page layout, with the full state table flagged to this county on
+# page 1 and its own sources note.
+emit_county <- function(focus_geoid, include_table = FALSE) {
+  save_png(
+    sprintf("%s-map.png", focus_geoid),
     county_map(focus_geoid),
-    3.2,
-    3.2
+    2.4,
+    2.4
   )
   save_svg(
     sprintf("%s-race.svg", focus_geoid),
     race_plot(focus_geoid),
     5.8,
-    3.4
+    2.9
   )
   save_svg(
     sprintf("%s-income.svg", focus_geoid),
     income_plot(focus_geoid),
     5.8,
-    1.7
+    1.5
   )
 
   s <- county_stats(focus_geoid)
-  typst(tglue(
-    '
-#county-header("<<s$label>>")
 
-// Page 1: big numbers + county locator map.
-#grid(
-  columns: (1fr, 2.5in),
-  column-gutter: 0.4in,
-  align: horizon,
-  [
-    #stat("<<scales::comma(s$population)>>", "Total population")
-    #v(0.25in)
-    #stat("<<scales::dollar(s$income, accuracy = 1)>>", "Median household income")
-  ],
-  image("figures/<<focus_geoid>>-map.svg", width: 100%),
-)
-
+  # In single-county mode, the full state table (flagged to this county) plus a
+  # page break sit between the stats and the charts, exactly as before.
+  table_block <- if (include_table) {
+    tglue(
+      '
 #section-title(
   [Total Population],
   subtitle: [Every <<focus_state>> county, ordered from most to least populous; #hl("<<s$label>>") highlighted],
@@ -182,8 +212,34 @@ emit_county <- function(focus_geoid) {
 <<population_table_typst(focus_geoid)>>
 
 #pagebreak()
+'
+    )
+  } else {
+    ""
+  }
 
-// Page 2: comparison charts.
+  sources_block <- if (include_table) {
+    tglue('\n#v(1fr)\n#sources-note("<<acs_range>>", "<<generated_date>>")')
+  } else {
+    ""
+  }
+
+  typst(tglue(
+    '
+#county-header("<<s$label>>")
+
+#grid(
+  columns: (1fr, 2.2in),
+  column-gutter: 0.4in,
+  align: horizon,
+  [
+    #stat("<<scales::comma(s$population)>>", "Total population")
+    #v(0.25in)
+    #stat("<<scales::dollar(s$income, accuracy = 1)>>", "Median household income")
+  ],
+  image("figures/<<focus_geoid>>-map.png", width: 100%),
+)
+<<table_block>>
 #section-title(
   [Population by Race/Ethnicity],
   subtitle: [Share of total population in #hl("<<s$label>>") and #hl-gray("<<focus_state>>") as a whole],
@@ -197,9 +253,7 @@ emit_county <- function(focus_geoid) {
 )
 
 #image("figures/<<focus_geoid>>-income.svg", width: 100%)
-
-#v(1fr)
-#sources-note("<<acs_range>>", "<<generated_date>>")
+<<sources_block>>
 '
   ))
 }
@@ -210,11 +264,14 @@ emit_county <- function(focus_geoid) {
 #| output: asis
 
 if (is.null(focus_county)) {
-  # Full state report: a cover page, then each county in alphabetical order.
+  # Full state report: cover page, the ranked county table once, then a
+  # single-page profile for each county in alphabetical order.
   flag_rel <- sprintf("flags/%s.svg", state_slug)
   typst(tglue(
     '#state-cover("<<focus_state>>", "<<flag_rel>>", "<<scales::comma(state_total_population)>>", "<<n_counties>>")\n#pagebreak()'
   ))
+
+  emit_population_section()
 
   for (i in seq_len(nrow(counties_alpha))) {
     if (i > 1) {
@@ -223,7 +280,8 @@ if (is.null(focus_county)) {
     emit_county(counties_alpha$geoid[[i]])
   }
 } else {
-  # Single-county override: the state band, then that county's two pages.
+  # Single-county override: the state band, then that county's two-page spread
+  # with the full ranked table (the original single-county report).
   focus_geoid <- population_by_county |>
     mutate(bare = str_remove(county, " County$")) |>
     filter(bare == focus_county) |>
@@ -232,6 +290,6 @@ if (is.null(focus_county)) {
     stop("County not found in ", focus_state, ": ", focus_county)
   }
   typst(tglue('#state-band("<<focus_state>>")\n#v(0.25in)'))
-  emit_county(focus_geoid)
+  emit_county(focus_geoid, include_table = TRUE)
 }
 ```

@@ -1,12 +1,65 @@
 ---
-title: "Template Website"
+title: "By the Numbers"
 ---
 
-This is a Template website.
-In order for this template to be renderable we always use this as a first code chunk in any Quarto file:
-
 ```{r}
-# Use relative path to file from repo root
-here::i_am('website/index.qmd')
+#| label: setup
+#| include: false
+
+# Use relative path to file from repo root (repo convention).
+here::i_am("website/index.qmd")
+
+library(here)
+library(tidyverse)
+
+# One card per state, ordered alphabetically. The accent color and flag come
+# from the same sources the reports use, so the grid matches the PDFs. Each card
+# links to the pre-rendered PDF (committed under website/reports/, built by
+# R/render-reports.R) and downloads on click.
+state_slug <- function(s) {
+  s |>
+    str_to_lower() |>
+    str_replace_all("[^a-z]+", "_") |>
+    str_remove("_$")
+}
+
+states <- read_csv(
+  here("data_raw", "state_colors.csv"),
+  show_col_types = FALSE
+) |>
+  mutate(
+    slug = state_slug(state),
+    pdf = str_glue("reports/{slug}-by-the-numbers.pdf"),
+    flag = str_glue("flags/{slug}.svg")
+  ) |>
+  arrange(state)
+
+cards <- states |>
+  mutate(
+    card = str_glue(
+      '<a class="report-card" href="{pdf}" download style="--accent: {accent};">',
+      '<span class="report-card__flag"><img src="{flag}" alt="{state} flag" loading="lazy"></span>',
+      '<span class="report-card__name">{state}</span>',
+      '<span class="report-card__hint">Download PDF</span>',
+      "</a>"
+    )
+  ) |>
+  pull(card)
 ```
 
+A demographic and economic profile for every county, from the American
+Community Survey (5-year estimates). Pick a state to download its report.
+
+```{r}
+#| label: grid
+#| output: asis
+
+# Emit the grid as a raw HTML block (```{=html}) so pandoc passes it through
+# verbatim. Without the fence, pandoc reprocesses the markup and wraps the cards
+# in <p> tags, which breaks the CSS grid (the cards stop being grid children).
+cat("```{=html}\n")
+cat('<div class="report-grid">\n')
+cat(paste(cards, collapse = "\n"))
+cat("\n</div>\n")
+cat("```\n")
+```

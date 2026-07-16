@@ -24,7 +24,9 @@ if (!exists("states_to_render")) {
 
 report_qmd <- here("report", "report.qmd")
 rendered_pdf <- here("report", "report.pdf")
-out_dir <- here("outputs")
+# The reports are published: the website (website/index.qmd) links to them and
+# CI deploys website/_site to Cloudflare, so they land in the site's reports/.
+out_dir <- here("website", "reports")
 dir.create(out_dir, showWarnings = FALSE)
 
 # "New York" -> "new_york", matching the flag filenames and the state slug in

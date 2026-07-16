@@ -1,21 +1,24 @@
 project:
   type: website
+  # Ship the report PDFs and flag thumbnails into _site so the grid can link to
+  # them. index.qmd builds the links dynamically from data_raw/state_colors.csv,
+  # so declare the folders here rather than relying on Quarto's link detection.
+  resources:
+    - reports/
+    - flags/
 
 website:
-  title: "Template"
-  navbar:
-    left:
-      - href: index.qmd
-        text: Home
-      - about.qmd
+  title: "By the Numbers"
+  description: "Demographic and economic profiles for every U.S. state, county by county."
 
 format:
   html:
-    theme:
-      - cosmo
-      - brand
+    theme: cosmo
     css: styles.css
-    toc: true
+    toc: false
+    page-layout: full
 
-
-
+execute:
+  echo: false
+  warning: false
+  message: false

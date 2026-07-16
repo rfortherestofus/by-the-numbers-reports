@@ -32,8 +32,10 @@ if (nrow(state_color_row) != 1) {
 }
 focus_color <- state_color_row$accent[[1]]
 
-# Lighter tint of the accent, for the filled focus county on the map and the
-# band subtitle. Blends the accent toward white; base R only, no new dependency.
+# Lighter tint of the accent, for the "By the Numbers" band subtitle (a light
+# tint reads on the dark accent band). Blends the accent toward white; base R
+# only, no new dependency. The map fills the focus county with the full accent
+# color, not this tint.
 lighten <- function(hex, amount = 0.6) {
   blended <- (1 - amount) * col2rgb(hex) + amount * 255
   rgb(blended[1], blended[2], blended[3], maxColorValue = 255)
@@ -138,12 +140,12 @@ county_stats <- function(focus_geoid) {
 # ---- Per-county figures ----
 
 # County locator map: the whole state in grey, the focus county filled with the
-# accent tint on top.
+# state accent color on top.
 county_map <- function(focus_geoid) {
   focus_geom <- county_map_data |> filter(geoid == focus_geoid)
   ggplot() +
     geom_sf(data = state_map_data, fill = other_color, color = "white") +
-    geom_sf(data = focus_geom, fill = focus_fill, color = "grey40") +
+    geom_sf(data = focus_geom, fill = focus_color, color = "grey40") +
     theme_void()
 }
 

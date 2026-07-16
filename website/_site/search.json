@@ -1,0 +1,16 @@
+[
+  {
+    "objectID": "index.html",
+    "href": "index.html",
+    "title": "By the Numbers",
+    "section": "",
+    "text": "A demographic and economic profile for every county, from the American Community Survey (5-year estimates). Pick a state to download its report.\n\nAlabamaDownload PDF\nAlaskaDownload PDF\nArizonaDownload PDF\nArkansasDownload PDF\nCaliforniaDownload PDF\nColoradoDownload PDF\nConnecticutDownload PDF\nDelawareDownload PDF\nFloridaDownload PDF\nGeorgiaDownload PDF\nHawaiiDownload PDF\nIdahoDownload PDF\nIllinoisDownload PDF\nIndianaDownload PDF\nIowaDownload PDF\nKansasDownload PDF\nKentuckyDownload PDF\nLouisianaDownload PDF\nMaineDownload PDF\nMarylandDownload PDF\nMassachusettsDownload PDF\nMichiganDownload PDF\nMinnesotaDownload PDF\nMississippiDownload PDF\nMissouriDownload PDF\nMontanaDownload PDF\nNebraskaDownload PDF\nNevadaDownload PDF\nNew HampshireDownload PDF\nNew JerseyDownload PDF\nNew MexicoDownload PDF\nNew YorkDownload PDF\nNorth CarolinaDownload PDF\nNorth DakotaDownload PDF\nOhioDownload PDF\nOklahomaDownload PDF\nOregonDownload PDF\nPennsylvaniaDownload PDF\nPuerto RicoDownload PDF\nRhode IslandDownload PDF\nSouth CarolinaDownload PDF\nSouth DakotaDownload PDF\nTennesseeDownload PDF\nTexasDownload PDF\nUtahDownload PDF\nVermontDownload PDF\nVirginiaDownload PDF\nWashingtonDownload PDF\nWest VirginiaDownload PDF\nWisconsinDownload PDF\nWyomingDownload PDF"
+  },
+  {
+    "objectID": "flags/SOURCES.html",
+    "href": "flags/SOURCES.html",
+    "title": "State flag images",
+    "section": "",
+    "text": "State flag images\nSVG flags for all 50 states, the District of Columbia, and Puerto Rico, one per file, named by the state slug the report uses (lowercase, spaces to underscores: new_york.svg, district_of_columbia.svg).\nU.S. state flags are official government insignia and the SVG renderings on Wikimedia Commons are in the public domain, so they can be embedded in the reports without attribution. Crediting Wikimedia Commons is good practice.\nR/data-viz.R derives the flag filename from the state name; the state cover page in report/typst-template.typ (state-cover()) embeds it."
+  }
+]

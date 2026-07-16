@@ -49,8 +49,9 @@ po/*~
 # RStudio Connect folder
 rsconnect/
 
-# Ignore _site on website (will be force pushed on "published" branch)
-website/_site/
+# The built website (website/_site) IS committed: Cloudflare Pages serves it
+# directly as a static directory, so it must be in the repo. Rebuild it with
+# `quarto render website` after changing the site or the reports, and commit it.
 
 # Scratch/experimentation script, not for version control
 R/temp.R
