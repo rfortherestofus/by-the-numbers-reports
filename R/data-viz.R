@@ -3,17 +3,21 @@
 # Reads the tidy datasets written by R/import-data.R (from data_clean/) and
 # builds the figures for a single-state report. Set the focus parameters below;
 # everything downstream filters the nationwide data to them.
+#
+# Figures are exported without titles or subtitles: those live in the Typst
+# layout (report/report.qmd), which sources this script for the plots and data.
 here::i_am("R/data-viz.R")
 
 library(here)
 library(tidyverse)
 library(sf)
-library(marquee)
-library(gt)
 
 # ---- Parameters ----
-focus_state <- "California" # state this report covers; must match the `state` column
-focus_county <- "Los Angeles" # county to highlight; must match the `county` column
+# Defaults for running this script interactively. report/report.qmd sets both
+# from its YAML metadata before sourcing, so the report is parameterized in
+# one place (the qmd header). Values must match the `state`/`county` columns.
+if (!exists("focus_state")) focus_state <- "California"
+if (!exists("focus_county")) focus_county <- "Los Angeles"
 
 # ---- Palette ----
 focus_color <- "#4C7A2F" # highlight for dots, bars, and the table
@@ -45,16 +49,6 @@ focus_county_data <- county_map_data |>
 focus_geoid <- focus_county_data$geoid
 focus_label <- paste0(focus_county, " County")
 
-# marquee style for titles: highlight a `{.hl ...}` span with the focus green.
-title_style <- modify_style(
-  classic_style(),
-  "hl",
-  background = focus_color,
-  color = "white",
-  padding = trbl(em(0.1), em(0.1)),
-  border_radius = em(0.25)
-)
-
 # ---- State map ----
 state_map <- ggplot(state_map_data) +
   geom_sf() +
@@ -83,17 +77,16 @@ focus_income <- income_by_county |>
   pull(median_household_income)
 
 # All dots sit on one row (y = 1); the vertical jitter only spreads overlapping
-# counties apart and carries no meaning (the subtitle says so). Seed keeps it
-# reproducible across renders.
-set.seed(1)
+# counties apart and carries no meaning (the report subtitle says so). The seed
+# lives in position_jitter() because jitter is drawn at plot-build time (e.g.
+# inside ggsave), not when this object is created.
 income_plot <- ggplot(
   income_by_county,
   aes(x = median_household_income, y = 1)
 ) +
   geom_jitter(
     data = \(d) filter(d, !is_focus),
-    height = 0.18,
-    width = 0,
+    position = position_jitter(width = 0, height = 0.18, seed = 1),
     color = other_color,
     size = 2.5,
     alpha = 0.8
@@ -106,27 +99,17 @@ income_plot <- ggplot(
   scale_x_continuous(labels = scales::label_dollar()) +
   scale_y_continuous(limits = c(0.4, 1.6)) +
   labs(
-    title = paste0(
-      "Median household income in {.hl ",
-      focus_label,
-      "} is ",
-      scales::dollar(focus_income, accuracy = 1)
-    ),
-    subtitle = paste0(
-      "Each gray dot is another ",
-      focus_state,
-      " county; dots are spread to random heights to avoid overlap"
-    ),
     x = NULL,
     y = NULL
   ) +
   theme_minimal() +
   theme(
-    plot.title = element_marquee(style = title_style),
     axis.text.y = element_blank(),
     axis.ticks.y = element_blank(),
     panel.grid = element_blank(),
-    panel.grid.major.x = element_line(color = "grey92")
+    panel.grid.major.x = element_line(color = "grey92"),
+    # Room for the outermost axis labels, which otherwise clip at the edges.
+    plot.margin = margin(5.5, 15, 5.5, 15)
   )
 
 income_plot
@@ -168,7 +151,9 @@ compute_shares <- function(df, geo_label) {
 }
 
 # Focus county shares (county table) and statewide shares (state table).
-focus_race_shares <- read_clean("population_by_county_and_race_ethnicity.rds") |>
+focus_race_shares <- read_clean(
+  "population_by_county_and_race_ethnicity.rds"
+) |>
   filter(geoid == focus_geoid) |>
   compute_shares(focus_label)
 
@@ -252,90 +237,17 @@ race_plot <- ggplot(
 
 race_plot
 
-# ---- Total population by county (table) ----
-# Every county's total population in a two-column "newspaper" layout so all 58
-# rows fit without an overly long table. Counties are ordered most to least
-# populous; the focus county is bolded and greened. Match by geoid, not name.
+# ---- Total population by county ----
+# Ordered most to least populous, with the focus county flagged (by geoid, not
+# name). The report renders this as a native Typst table in a multi-column
+# "newspaper" layout; that layout code lives in report/report.qmd.
 population_by_county <- read_clean("total_population_by_county.rds") |>
   filter(state == focus_state) |>
   mark_focus() |>
   arrange(desc(total_population))
 
-# Reshape the single 58-row frame into two side-by-side county/population pairs.
-# `col` (1 or 2) is the visual column and `slot` the row within it; the focus
-# flag rides along so the highlight follows the county to whichever column it
-# lands in.
 n_counties <- nrow(population_by_county)
-rows_per_col <- ceiling(n_counties / 2)
-# match() (not which()) yields NA rather than length-0 if the focus is missing.
-focus_rank <- match(TRUE, population_by_county$is_focus)
 
-population_table_data <- population_by_county |>
-  mutate(
-    col = (row_number() - 1) %/% rows_per_col + 1,
-    slot = (row_number() - 1) %% rows_per_col + 1
-  ) |>
-  pivot_wider(
-    id_cols = slot,
-    names_from = col,
-    values_from = c(county, total_population, is_focus)
-  ) |>
-  select(
-    county_1,
-    total_population_1,
-    county_2,
-    total_population_2,
-    is_focus_1,
-    is_focus_2
-  )
-
-# "the largest population" when the focus county ranks first, else "the Nth-largest".
-focus_rank_phrase <- if (isTRUE(focus_rank == 1)) {
-  "the largest population"
-} else {
-  paste0("the ", scales::ordinal(focus_rank), "-largest population")
-}
-
-# Both visual columns get the same focus highlight, keyed on their own flag, so
-# the bold green follows the county to whichever column it lands in.
-focus_column_groups <- list(
-  list(cols = c("county_1", "total_population_1"), flag = "is_focus_1"),
-  list(cols = c("county_2", "total_population_2"), flag = "is_focus_2")
-)
-
-population_table <- population_table_data |>
-  gt() |>
-  tab_header(
-    title = md(str_glue(
-      "**{focus_label}** has {focus_rank_phrase} of {focus_state}'s {n_counties} counties"
-    )),
-    subtitle = "Total population of every county, ordered from most to least populous"
-  ) |>
-  cols_label(
-    county_1 = "County",
-    total_population_1 = "Population",
-    county_2 = "County",
-    total_population_2 = "Population"
-  ) |>
-  fmt_number(c(total_population_1, total_population_2), decimals = 0) |>
-  sub_missing(missing_text = "") |>
-  cols_align("left", c(county_1, county_2)) |>
-  cols_align("right", c(total_population_1, total_population_2))
-
-population_table <- reduce(
-  focus_column_groups,
-  \(tbl, group) {
-    tbl |>
-      tab_style(
-        style = cell_text(weight = "bold", color = focus_color),
-        locations = cells_body(
-          columns = all_of(group$cols),
-          rows = .data[[group$flag]] %in% TRUE
-        )
-      )
-  },
-  .init = population_table
-) |>
-  cols_hide(c(is_focus_1, is_focus_2))
-
-population_table
+focus_population <- population_by_county |>
+  filter(is_focus) |>
+  pull(total_population)

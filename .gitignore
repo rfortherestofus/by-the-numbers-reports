@@ -54,3 +54,8 @@ website/_site/
 
 # Scratch/experimentation script, not for version control
 R/temp.R
+
+# Rendered report artifacts (source is report/report.qmd)
+report/report.pdf
+report/report.typ
+report/figures/
