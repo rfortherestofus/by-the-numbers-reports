@@ -1,0 +1,182 @@
+---
+# "By the numbers" county report. Layout follows report/wireframe.typ.
+#
+# county/state below are the report parameters: typst-show.typ passes them
+# into the report() template (header band, footer), and the setup chunk
+# passes them to R/data-viz.R (data filtering). `county` must match the
+# `county` column in the cleaned data (bare name, no "County" suffix).
+#
+# All Typst definitions live in typst-template.typ; this document only calls
+# them. Render with: quarto render report/report.qmd
+county: San Diego
+state: California
+format:
+  typst:
+    template-partials:
+      - typst-show.typ
+      - typst-template.typ
+    keep-typ: true
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: setup
+#| include: false
+
+# Quarto executes this document from report/, where the repo root's .Rprofile
+# does not run, so activate the renv library explicitly.
+Sys.setenv(RENV_PROJECT = normalizePath(".."))
+source("../renv/activate.R")
+
+# The YAML metadata above is the single source of the report parameters;
+# data-viz.R falls back to its own defaults only when run interactively.
+focus_state <- rmarkdown::metadata$state
+focus_county <- rmarkdown::metadata$county
+
+# All figures and report data come from the shared data-viz script.
+source(here::here("R", "data-viz.R"))
+
+# Emit a raw Typst block from an asis chunk.
+typst <- function(...) {
+  cat("\n```{=typst}\n", ..., "\n```\n", sep = "")
+}
+
+# glue with << >> delimiters so Typst's own braces pass through untouched.
+# .envir forwards the caller's environment so this works inside mutate().
+tglue <- function(..., .envir = parent.frame()) {
+  str_glue(..., .open = "<<", .close = ">>", .envir = .envir)
+}
+
+# ACS vintage, read from the import script so the sources note stays in sync.
+acs_year <- read_lines(here::here("R", "import-data.R")) |>
+  str_subset("^acs_year <-") |>
+  str_extract("\\d{4}") |>
+  as.integer()
+acs_range <- str_glue("{acs_year - 4}–{acs_year}")
+
+# Export the figures the Typst layout embeds. SVG via svglite (named
+# explicitly so renv::snapshot() keeps it in the lockfile).
+fig_dir <- here::here("report", "figures")
+dir.create(fig_dir, showWarnings = FALSE)
+save_svg <- function(name, plot, width, height) {
+  ggsave(
+    file.path(fig_dir, name),
+    plot,
+    device = svglite::svglite,
+    width = width,
+    height = height
+  )
+}
+# Full-width figures match the 5.8in content width (us-letter minus the
+# 1.35in x margins set in typst-template.typ) so fonts render at true size.
+save_svg("county-map.svg", county_map, 3.2, 3.2)
+save_svg("race-plot.svg", race_plot, 5.8, 3.4)
+save_svg("income-plot.svg", income_plot, 5.8, 1.7)
+```
+
+```{r}
+#| label: typst-values
+#| output: asis
+
+# Values computed in R that the body text references, passed to Typst as
+# `#let` bindings. Values are Typst strings, which also keeps "$" from being
+# read as math markup.
+typst(tglue(
+  '
+#let focus-county = "<<focus_label>>"
+#let focus-state = "<<focus_state>>"
+#let n-counties = "<<n_counties>>"
+#let focus-population = "<<scales::comma(focus_population)>>"
+#let focus-income = "<<scales::dollar(focus_income, accuracy = 1)>>"
+#let acs-range = "<<acs_range>>"
+#let generated-date = "<<str_squish(format(Sys.Date(), "%B %e, %Y"))>>"
+'
+))
+```
+
+```{=typst}
+// ---- Big numbers + county locator map ----
+#grid(
+  columns: (1fr, 2.5in),
+  column-gutter: 0.4in,
+  align: horizon,
+  [
+    #stat(focus-population, "Total population")
+    #v(0.25in)
+    #stat(focus-income, "Median household income")
+  ],
+  image("figures/county-map.svg", width: 100%),
+)
+
+#section-title(
+  [Total Population],
+  subtitle: [Every #focus-state county, ordered from most to least populous],
+)
+```
+
+```{r}
+#| label: population-table
+#| output: asis
+
+# The population table cells: n_table_cols side-by-side county/population
+# pairs separated by spacer columns, filled top to bottom, left to right
+# (population-table() in typst-template.typ builds the matching columns).
+# Typst tables are a flat cell stream, so short columns are padded with empty
+# cells to keep later rows aligned. Three columns is the most that fits the
+# 5.8in content width without wrapping names; the " County" suffix is dropped
+# so names stay on one line (the column header already says "County").
+n_table_cols <- 3
+rows_per_col <- ceiling(n_counties / n_table_cols)
+
+county_cells <- population_by_county |>
+  mutate(
+    county = str_remove(county, " County$"),
+    cell = tglue(
+      '..county-cell("<<county>>", "<<scales::comma(total_population)>>", focus: <<tolower(is_focus)>>),'
+    ),
+    col = (row_number() - 1) %/% rows_per_col,
+    slot = (row_number() - 1) %% rows_per_col
+  )
+
+table_rows <- map_chr(seq_len(rows_per_col) - 1, function(s) {
+  pairs <- map_chr(seq_len(n_table_cols) - 1, function(cl) {
+    cell <- county_cells |> filter(col == cl, slot == s) |> pull(cell)
+    if (length(cell) == 1) cell else "[], [],"
+  })
+  paste(pairs, collapse = " [],\n  ")
+})
+
+typst(tglue(
+  '
+#population-table(
+  <<n_table_cols>>,
+  <<paste(table_rows, collapse = "\n  ")>>
+)
+'
+))
+```
+
+```{=typst}
+#pagebreak()
+
+// ---- Comparison charts ----
+#section-title(
+  [Population by Race/Ethnicity],
+  subtitle: [Share of total population in #hl[#focus-county] and #hl-gray[#focus-state] as a whole],
+)
+
+#image("figures/race-plot.svg", width: 100%)
+
+#section-title(
+  [Median Household Income],
+  subtitle: [#hl[#focus-county] among #hl-gray[all #n-counties #focus-state counties]; dots are spread vertically only to avoid overlap],
+)
+
+#image("figures/income-plot.svg", width: 100%)
+
+#v(1fr)
+#sources-note(acs-range, generated-date)
+```
